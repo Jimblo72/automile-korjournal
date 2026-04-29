@@ -195,8 +195,8 @@ select option{background:var(--surface2)}
     <div class="card">
       <div class="card-title">Klassificeringslogik</div>
       <div style="display:flex;flex-direction:column;gap:10px;">
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--green);font-weight:700;font-size:12px;margin-bottom:4px;">✅ Auto → Tjänst</div><div style="font-size:11px;color:var(--text3);line-height:1.6;">Start <em>eller</em> slut matchar Kontor — och <em>inte</em> en hemadress i andra änden.</div></div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--amber);font-weight:700;font-size:12px;margin-bottom:4px;">🏠 Auto → Privat</div><div style="font-size:11px;color:var(--text3);line-height:1.6;"><strong>Hem↔Kontor</strong> (pendling) klassas alltid som Privat. Likaså Hem→Hem och kända privatadresser.</div></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--green);font-weight:700;font-size:12px;margin-bottom:4px;">✅ Auto → Tjänst</div><div style="font-size:11px;color:var(--text3);line-height:1.6;">Kontor → var som helst (utom Hem). Eller: var som helst → Kontor (utom från Hem).</div></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--amber);font-weight:700;font-size:12px;margin-bottom:4px;">🏠 Auto → Privat</div><div style="font-size:11px;color:var(--text3);line-height:1.6;"><strong>Hem↔Kontor</strong> (pendling), <strong>Hem→okänd</strong>, <strong>Hem→Hem</strong> och kända privatadresser.</div></div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--yellow);font-weight:700;font-size:12px;margin-bottom:4px;">❓ Oklassad</div><div style="font-size:11px;color:var(--text3);line-height:1.6;">Ingen adress matchar. Klicka på badge för att byta typ manuellt.</div></div>
       </div>
       <div class="divider"></div>
@@ -387,14 +387,20 @@ function autoClassify(t){
   const priv=STATE.addresses.filter(a=>a.type==='private').map(a=>a.label.toLowerCase());
   const m=(addr,list)=>list.some(l=>{const parts=l.split(/[\s,]+/).filter(p=>p.length>3);return parts.length>0&&parts.some(p=>addr.includes(p));});
   const sBiz=m(s,biz),eBiz=m(e,biz),sHome=m(s,home),eHome=m(e,home);
-  // Hem ↔ Kontor = pendling = Privat
+  // Hem → Kontor eller Kontor → Hem = pendling = Privat
   if((sHome&&eBiz)||(sBiz&&eHome))return 'private';
-  // Kontor → någonstans = Tjänst
-  if(sBiz||eBiz)return 'business';
+  // Kontor → var som helst (utom Hem) = Tjänst
+  if(sBiz&&!eHome)return 'business';
+  // Var som helst → Kontor (utom Hem) = Tjänst
+  if(eBiz&&!sHome)return 'business';
+  // Hem → Hem = Privat
+  if(sHome&&eHome)return 'private';
+  // Hem → okänd eller okänd → Hem = Privat
+  if(sHome||eHome)return 'private';
   // Automiles egna märkning
   if(t.importedType)return t.importedType;
-  // Hem→Hem eller kända privatadresser
-  if((sHome&&eHome)||(m(s,priv)&&m(e,priv)))return 'private';
+  // Kända privatadresser
+  if(m(s,priv)||m(e,priv))return 'private';
   return 'unclassified';
 }
 
