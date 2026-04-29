@@ -91,6 +91,7 @@ input[type="checkbox"]{width:14px;height:14px;accent-color:var(--accent2);cursor
 select option{background:var(--surface2)}
 </style>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 <header>
@@ -233,47 +234,11 @@ function handleFile(file){
   if(!file)return;
   const name=file.name.toLowerCase();
   if(name.endsWith('.xlsx')||name.endsWith('.xls')){
-    // Skicka till server-funktion som använder openpyxl (undviker SheetJS-buggar)
     showAlert('importAlert','⏳ Läser in Excel-fil...','ok');
     const reader=new FileReader();
     reader.onload=async e=>{
       try{
-        // Chunked base64 - fungerar på stora filer
-        const bytes=new Uint8Array(e.target.result);
-        let binary='';
-        const chunk=8192;
-        for(let i=0;i<bytes.length;i+=chunk){
-          binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length)));
-        }
-        const base64=btoa(binary);
-        const res=await fetch('/.netlify/functions/parse_excel',{
-          method:'POST',
-          headers:{'Content-Type':'application/octet-stream'},
-          body:base64
-        });
-        const data=await res.json();
-        if(!res.ok||data.error){
-          showAlert('importAlert','❌ '+( data.error||'Serverfel'),'err');
-          return;
-        }
-        // Convert server trips to app format
-        const trips=data.trips.map((t,i)=>({
-          id:'xl_'+i+'_'+Date.now(),
-          date:t.date,
-          from:t.from,
-          to:t.to,
-          km:t.km,
-          importedType:t.importedType,
-          _manual:null,
-          _auto:null,
-          note:t.note||'',
-          driver:t.driver||''
-        }));
-        trips.forEach(t=>{t._auto=autoClassify(t);});
-        STATE.trips=trips;
-        save();updateStats();renderTable();
-        showAlert('importAlert','✅ '+trips.length+' körningar importerade. '+trips.filter(t=>effectiveType(t)!=='unclassified').length+' auto-klassade.','ok');
-        setTimeout(()=>showTab('trips',document.querySelectorAll('.tab')[0]),700);
+        await parseXLSXfromBuffer(e.target.result);
       }catch(err){
         showAlert('importAlert','❌ Fel: '+err.message,'err');
       }
@@ -286,6 +251,73 @@ function handleFile(file){
   } else {
     showAlert('importAlert','❌ Använd Excel (.xlsx) eller CSV.','err');
   }
+}
+
+async function parseXLSXfromBuffer(buf){
+  // Unzip the xlsx file and parse the XML directly — bypasses SheetJS style bugs
+  const zip=await JSZip.loadAsync(buf);
+
+  // Get shared strings
+  let sharedStrings=[];
+  const ssFile=zip.file('xl/sharedStrings.xml');
+  if(ssFile){
+    const ssXml=await ssFile.async('string');
+    const parser=new DOMParser();
+    const ssDoc=parser.parseFromString(ssXml,'text/xml');
+    sharedStrings=Array.from(ssDoc.querySelectorAll('si')).map(si=>{
+      return Array.from(si.querySelectorAll('t')).map(t=>t.textContent).join('');
+    });
+  }
+
+  // Get first sheet
+  const wsFile=zip.file('xl/worksheets/sheet1.xml');
+  if(!wsFile)throw new Error('Hittade ingen kalkylblads-XML i filen');
+  const wsXml=await wsFile.async('string');
+  const parser=new DOMParser();
+  const wsDoc=parser.parseFromString(wsXml,'text/xml');
+
+  // Parse rows
+  const xmlRows=Array.from(wsDoc.querySelectorAll('row'));
+  const rawRows=xmlRows.map(row=>{
+    const cells=Array.from(row.querySelectorAll('c'));
+    if(!cells.length)return[];
+    // Find max col index
+    const getColIdx=ref=>{
+      const m=ref.match(/^([A-Z]+)/);
+      if(!m)return 0;
+      return m[1].split('').reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
+    };
+    const maxCol=Math.max(...cells.map(c=>getColIdx(c.getAttribute('r')||'')));
+    const arr=new Array(maxCol+1).fill('');
+    cells.forEach(c=>{
+      const ref=c.getAttribute('r')||'';
+      const idx=getColIdx(ref);
+      const t=c.getAttribute('t');
+      const vEl=c.querySelector('v');
+      if(!vEl){arr[idx]='';return;}
+      if(t==='s'){
+        arr[idx]=sharedStrings[parseInt(vEl.textContent)]||'';
+      } else if(t==='inlineStr'){
+        arr[idx]=c.querySelector('t')?.textContent||'';
+      } else {
+        // Check if it's a date (Excel serial number with date style)
+        const s=c.getAttribute('s');
+        const val=vEl.textContent;
+        // Try to detect date columns by value range (Excel dates > 40000)
+        const num=parseFloat(val);
+        if(!isNaN(num)&&num>40000&&num<60000&&s){
+          // Convert Excel serial date to JS date
+          const d=new Date(Math.round((num-25569)*86400*1000));
+          arr[idx]=d.toISOString();
+        } else {
+          arr[idx]=val;
+        }
+      }
+    });
+    return arr;
+  });
+
+  parseXLSX(rawRows);
 }
 
 function parseXLSX(rows){
