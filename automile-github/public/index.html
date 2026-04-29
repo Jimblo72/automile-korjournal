@@ -233,44 +233,42 @@ function handleFile(file){
   if(!file)return;
   const name=file.name.toLowerCase();
   if(name.endsWith('.xlsx')||name.endsWith('.xls')){
+    // Skicka till server-funktion som använder openpyxl (undviker SheetJS-buggar)
+    showAlert('importAlert','⏳ Läser in Excel-fil...','ok');
     const reader=new FileReader();
-    reader.onload=e=>{
+    reader.onload=async e=>{
       try{
-        const data=new Uint8Array(e.target.result);
-        const wb=XLSX.read(data,{
-          type:'array',
-          cellDates:true,
-          cellStyles:false,
-          cellNF:false,
-          cellHTML:false,
-          sheetStubs:false,
-          dense:false,
-          WTF:false
+        const base64=btoa(String.fromCharCode(...new Uint8Array(e.target.result)));
+        const res=await fetch('/.netlify/functions/parse_excel',{
+          method:'POST',
+          headers:{'Content-Type':'application/octet-stream'},
+          body:base64
         });
-        const ws=wb.Sheets[wb.SheetNames[0]];
-        // Convert to JSON safely
-        let rows=[];
-        try{
-          rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false,blankrows:false});
-        }catch(e2){
-          // Fallback: manual cell reading
-          const ref=ws['!ref'];
-          if(ref){
-            const range=XLSX.utils.decode_range(ref);
-            for(let r=range.s.r;r<=range.e.r;r++){
-              const row=[];
-              for(let c=range.s.c;c<=range.e.c;c++){
-                const addr=XLSX.utils.encode_cell({r,c});
-                const cell=ws[addr];
-                row.push(cell?cell.v:'');
-              }
-              rows.push(row);
-            }
-          }
+        const data=await res.json();
+        if(!res.ok||data.error){
+          showAlert('importAlert','❌ '+( data.error||'Serverfel'),'err');
+          return;
         }
-        parseXLSX(rows);
+        // Convert server trips to app format
+        const trips=data.trips.map((t,i)=>({
+          id:'xl_'+i+'_'+Date.now(),
+          date:t.date,
+          from:t.from,
+          to:t.to,
+          km:t.km,
+          importedType:t.importedType,
+          _manual:null,
+          _auto:null,
+          note:t.note||'',
+          driver:t.driver||''
+        }));
+        trips.forEach(t=>{t._auto=autoClassify(t);});
+        STATE.trips=trips;
+        save();updateStats();renderTable();
+        showAlert('importAlert','✅ '+trips.length+' körningar importerade. '+trips.filter(t=>effectiveType(t)!=='unclassified').length+' auto-klassade.','ok');
+        setTimeout(()=>showTab('trips',document.querySelectorAll('.tab')[0]),700);
       }catch(err){
-        showAlert('importAlert','❌ Kunde inte läsa Excel-filen: '+err.message,'err');
+        showAlert('importAlert','❌ Fel: '+err.message,'err');
       }
     };
     reader.readAsArrayBuffer(file);
