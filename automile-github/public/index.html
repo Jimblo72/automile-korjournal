@@ -247,7 +247,7 @@ function handleFile(file){
 
 function parseXLSX(buf){
   try {
-    const wb=XLSX.read(buf,{type:'arraybuffer',cellDates:true});
+    const wb=XLSX.read(buf,{type:'arraybuffer',cellDates:true,cellStyles:false});
     const ws=wb.Sheets[wb.SheetNames[0]];
     const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
     if(rows.length<2){showAlert('importAlert','❌ Tom fil.','err');return;}
@@ -273,9 +273,11 @@ function parseXLSX(buf){
     };
     // Data starts after header row
     const dataRows=rows.slice(headerRowIdx+1);
+    // Read with no styles to avoid null style errors
     const trips=[];
     for(let i=0;i<dataRows.length;i++){
       const c=dataRows[i];
+      if(!c||!Array.isArray(c)||c.every(v=>v===''||v===null||v===undefined))continue;
       const from=cols.from>=0?String(c[cols.from]||'').trim():'';
       const to=cols.to>=0?String(c[cols.to]||'').trim():'';
       if(!from&&!to)continue;
@@ -562,7 +564,7 @@ function exportExcel(){
   const WHITE='FFFFFFFF';
 
   // Helper: cell style objects for SheetJS
-  function hdrStyle(bg){return{font:{name:'Calibri',bold:true,sz:10,color:{rgb:WHITE}},fill:{patternType:'solid',fgColor:{rgb:bg}},alignment:{horizontal:'left',vertical:'center'},border:{top:{style:'thin',color:{rgb:'D0D0D0'}},bottom:{style:'thin',color:{rgb:'D0D0D0'}},left:{style:'thin',color:{rgb:'D0D0D0'}},right:{style:'thin',color:{rgb:'D0D0D0'}}}};}
+  function hdrStyle(bg){try{return{font:{name:'Calibri',bold:true,sz:10,color:{rgb:WHITE}},fill:{patternType:'solid',fgColor:{rgb:bg}},alignment:{horizontal:'left',vertical:'center'},border:{top:{style:'thin',color:{rgb:'D0D0D0'}},bottom:{style:'thin',color:{rgb:'D0D0D0'}},left:{style:'thin',color:{rgb:'D0D0D0'}},right:{style:'thin',color:{rgb:'D0D0D0'}}}};}catch(e){return{};}}
   function cellStyle(bg,bold,color){return{font:{name:'Calibri',sz:10,bold:!!bold,color:{rgb:color||'333333'}},fill:{patternType:'solid',fgColor:{rgb:bg||WHITE}},alignment:{vertical:'center'},border:{top:{style:'thin',color:{rgb:'D0D0D0'}},bottom:{style:'thin',color:{rgb:'D0D0D0'}},left:{style:'thin',color:{rgb:'D0D0D0'}},right:{style:'thin',color:{rgb:'D0D0D0'}}}};}
   function titleStyle(bg){return{font:{name:'Calibri',bold:true,sz:18,color:{rgb:WHITE}},fill:{patternType:'solid',fgColor:{rgb:bg}},alignment:{vertical:'center'}};}
 
@@ -589,11 +591,11 @@ function exportExcel(){
       const alt=i%2===1;
       const bg=alt?accentLight:WHITE;
       aoa.push([
-        {v:t.date,s:cellStyle(bg)},
-        {v:(t.from||'').replace(', Sverige',''),s:cellStyle(bg)},
-        {v:(t.to||'').replace(', Sverige',''),s:cellStyle(bg)},
-        {v:parseFloat(t.km.toFixed(1)),s:{...cellStyle(bg),alignment:{horizontal:'right',vertical:'center'},numFmt:'0.0'}},
-        {v:t.note||'',s:cellStyle(bg)},
+        {v:t.date||'',s:cellStyle(bg)},
+        {v:String(t.from||'').replace(', Sverige',''),s:cellStyle(bg)},
+        {v:String(t.to||'').replace(', Sverige',''),s:cellStyle(bg)},
+        {v:parseFloat((t.km||0).toFixed(1)),s:{...cellStyle(bg),alignment:{horizontal:'right',vertical:'center'},numFmt:'0.0'}},
+        {v:String(t.note||''),s:cellStyle(bg)},
       ]);
     });
     // Total row
