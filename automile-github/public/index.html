@@ -243,6 +243,19 @@ function showTab(name,btn){
 function onDrag(e,on){e.preventDefault();document.getElementById('dropZone').classList.toggle('drag',on);}
 function onDrop(e){e.preventDefault();document.getElementById('dropZone').classList.remove('drag');const f=e.dataTransfer.files[0];if(f)handleFile(f);}
 
+function mergeTrips(existing, incoming){
+  // Bygg ett set av signaturer från befintliga körningar
+  // Signatur = datum (dag+timme) + från + till
+  const sig=t=>{
+    const d=t.date?t.date.slice(0,16):'';
+    return d+'|'+(t.from||'').slice(0,30)+'|'+(t.to||'').slice(0,30);
+  };
+  const existing_sigs=new Set(existing.map(sig));
+  const new_trips=incoming.filter(t=>!existing_sigs.has(sig(t)));
+  // Sortera ihop, nyast först
+  return [...existing,...new_trips].sort((a,b)=>new Date(b.date)-new Date(a.date));
+}
+
 function handleFile(file){
   if(!file)return;
   const name=file.name.toLowerCase();
@@ -397,8 +410,10 @@ function parseXLSX(rows){
       trips.push(t);
     }
     if(!trips.length){showAlert('importAlert','❌ Inga körningar hittades i Excel-filen.','err');return;}
-    STATE.trips=trips;save();updateStats();renderTable();
-    showAlert('importAlert','✅ '+trips.length+' körningar importerade. '+trips.filter(t=>effectiveType(t)!=='unclassified').length+' auto-klassade.','ok');
+    const merged=mergeTrips(STATE.trips,trips);
+    const added=merged.length-STATE.trips.length;
+    STATE.trips=merged;save();updateStats();renderTable();
+    showAlert('importAlert','✅ '+trips.length+' körningar inlästa — '+added+' nya tillagda, '+(trips.length-added)+' dubletter ignorerade. '+merged.filter(t=>effectiveType(t)!=='unclassified').length+' auto-klassade totalt.','ok');
     setTimeout(()=>showTab('trips',document.querySelectorAll('.tab')[0]),700);
   } catch(e){
     showAlert('importAlert','❌ Fel vid tolkning av Excel: '+e.message,'err');
@@ -443,8 +458,10 @@ function parseCSV(text){
     trips.push(t);
   }
   if(!trips.length){showAlert('importAlert','❌ Inga körningar hittades. Kontrollera CSV-format.','err');return;}
-  STATE.trips=trips;save();updateStats();renderTable();
-  showAlert('importAlert','✅ '+trips.length+' körningar importerade. '+trips.filter(t=>effectiveType(t)!=='unclassified').length+' auto-klassade.','ok');
+  const merged=mergeTrips(STATE.trips, trips);
+  const added=merged.length-STATE.trips.length;
+  STATE.trips=merged;save();updateStats();renderTable();
+  showAlert('importAlert','✅ '+trips.length+' körningar inlästa — '+added+' nya tillagda, '+(trips.length-added)+' dubletter ignorerade.','ok');
   setTimeout(()=>showTab('trips',document.querySelectorAll('.tab')[0]),700);
 }
 
@@ -594,6 +611,10 @@ function computeCommute(){
   document.getElementById('cKm').textContent=totalKm.toFixed(0)+' km';
   document.getElementById('cAvg').textContent=avgKm.toFixed(1)+' km';
 
+  // Tag individual trips as commute
+  STATE.trips.forEach(t=>t._commute=false);
+  chains.forEach(c=>c.trips.forEach(t=>t._commute=true));
+
   // Store for export
   STATE.commuteChains=chains;
   STATE.commuteDays=days.size;
@@ -616,7 +637,8 @@ function renderTable(){
     const tp=effectiveType(t),isAuto=!t._manual&&t._auto!=='unclassified';
     const bc=tp==='business'?'b-biz':tp==='private'?'b-priv':'b-un';
     const bl=tp==='business'?'✅ Tjänst':tp==='private'?'🏠 Privat':'❓ Oklassad';
-    return '<tr><td><input type="checkbox" '+(STATE.selected.has(t.id)?'checked':'')+' onchange="toggleSel(\''+t.id+'\',this)"></td><td class="dt">'+fmtDate(t.date)+'</td><td class="addr-cell"><div class="from" style="color:var(--text2);margin-bottom:3px;">📍 '+esc(t.from||'—')+'</div><div><span style="color:var(--text3);font-size:11px;">↓&nbsp;</span><span class="to">'+esc(t.to||'—')+'</span></div></td><td class="km">'+t.km.toFixed(1)+' km</td><td><button class="badge '+bc+'" onclick="cycleType(\''+t.id+'\')">'+bl+(isAuto?'<span class="auto-tag">AUTO</span>':'')+'</button></td><td style="font-size:11px;color:var(--text3);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.note||'')+'</td></tr>';
+    const commuteTag=t._commute?'<span style="font-size:10px;background:#1a2040;color:#60a5fa;border-radius:4px;padding:2px 6px;margin-left:5px;font-weight:600;">pendling</span>':'';
+    return '<tr><td><input type="checkbox" '+(STATE.selected.has(t.id)?'checked':'')+' onchange="toggleSel(\''+t.id+'\',this)"></td><td class="dt">'+fmtDate(t.date)+'</td><td class="addr-cell"><div class="from" style="color:var(--text2);margin-bottom:3px;">📍 '+esc(t.from||'—')+'</div><div><span style="color:var(--text3);font-size:11px;">↓&nbsp;</span><span class="to">'+esc(t.to||'—')+'</span></div></td><td class="km">'+t.km.toFixed(1)+' km</td><td><button class="badge '+bc+'" onclick="cycleType(\''+t.id+'\')">'+bl+(isAuto?'<span class="auto-tag">AUTO</span>':'')+'</button>'+commuteTag+'</td><td style="font-size:11px;color:var(--text3);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.note||'')+'</td></tr>';
   }).join('');
   document.getElementById('tableWrap').innerHTML='<table><thead><tr><th style="width:36px;"><input type="checkbox" onchange="toggleAll(this)"></th><th>Datum</th><th>Från → Till</th><th>Km</th><th>Typ</th><th>Anteckning</th></tr></thead><tbody>'+rows+'</tbody></table>';
 }
