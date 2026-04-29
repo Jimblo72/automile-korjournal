@@ -68,7 +68,7 @@ tr:hover td{background:#ffffff05}
 .addr-item{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:7px;margin-bottom:6px}
 .addr-item span{flex:1;font-size:12px}
 .addr-badge{font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700}
-.ab-biz{background:#1a2f1a;color:var(--green)}.ab-priv{background:#2a1f0f;color:var(--amber)}
+.ab-biz{background:#1a2f1a;color:var(--green)}.ab-home{background:#1a2040;color:var(--blue)}.ab-priv{background:#2a1f0f;color:var(--amber)}
 .rm{background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;padding:1px 4px;border-radius:3px}
 .rm:hover{color:var(--red)}
 .add-row{display:flex;gap:8px;flex-wrap:wrap}
@@ -183,20 +183,20 @@ select option{background:var(--surface2)}
   <div class="two-col">
     <div class="card">
       <div class="card-title">Kända adresser</div>
-      <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">Start/slut som matchar en <strong style="color:var(--green)">tjänsteadress</strong> → Tjänst automatiskt. Bara privatadresser → Privat.</p>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">Tre typer: <strong style="color:var(--green)">Kontor/Tjänst</strong>, <strong style="color:var(--blue)">Hemadress</strong> och <strong style="color:var(--amber)">Privat övrigt</strong>.</p>
       <div class="addr-list" id="addrList"></div>
       <hr class="divider">
       <div class="add-row">
         <input type="text" id="newAddr" placeholder="Offerdalsvägen 7, Krokom">
-        <select id="newAddrType"><option value="business">Tjänst</option><option value="private">Privat</option></select>
+        <select id="newAddrType"><option value="business">Kontor/Tjänst</option><option value="home">Hemadress</option><option value="private">Privat övrigt</option></select>
         <button class="btn btn-secondary btn-sm" onclick="addAddr()">+ Lägg till</button>
       </div>
     </div>
     <div class="card">
       <div class="card-title">Klassificeringslogik</div>
       <div style="display:flex;flex-direction:column;gap:10px;">
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--green);font-weight:700;font-size:12px;margin-bottom:4px;">✅ Auto → Tjänst</div><div style="font-size:11px;color:var(--text3);line-height:1.6;">Start <em>eller</em> slut matchar en sparad tjänsteadress.</div></div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--amber);font-weight:700;font-size:12px;margin-bottom:4px;">🏠 Auto → Privat</div><div style="font-size:11px;color:var(--text3);line-height:1.6;">Automile har märkt resan som Privat, eller bara privatadresser matchar.</div></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--green);font-weight:700;font-size:12px;margin-bottom:4px;">✅ Auto → Tjänst</div><div style="font-size:11px;color:var(--text3);line-height:1.6;">Start <em>eller</em> slut matchar Kontor — och <em>inte</em> en hemadress i andra änden.</div></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--amber);font-weight:700;font-size:12px;margin-bottom:4px;">🏠 Auto → Privat</div><div style="font-size:11px;color:var(--text3);line-height:1.6;"><strong>Hem↔Kontor</strong> (pendling) klassas alltid som Privat. Likaså Hem→Hem och kända privatadresser.</div></div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px;"><div style="color:var(--yellow);font-weight:700;font-size:12px;margin-bottom:4px;">❓ Oklassad</div><div style="font-size:11px;color:var(--text3);line-height:1.6;">Ingen adress matchar. Klicka på badge för att byta typ manuellt.</div></div>
       </div>
       <div class="divider"></div>
@@ -383,11 +383,18 @@ function addManual(){
 function autoClassify(t){
   const s=(t.from||'').toLowerCase(),e=(t.to||'').toLowerCase();
   const biz=STATE.addresses.filter(a=>a.type==='business').map(a=>a.label.toLowerCase());
+  const home=STATE.addresses.filter(a=>a.type==='home').map(a=>a.label.toLowerCase());
   const priv=STATE.addresses.filter(a=>a.type==='private').map(a=>a.label.toLowerCase());
   const m=(addr,list)=>list.some(l=>{const parts=l.split(/[\s,]+/).filter(p=>p.length>3);return parts.length>0&&parts.some(p=>addr.includes(p));});
-  if(m(s,biz)||m(e,biz))return 'business';
+  const sBiz=m(s,biz),eBiz=m(e,biz),sHome=m(s,home),eHome=m(e,home);
+  // Hem ↔ Kontor = pendling = Privat
+  if((sHome&&eBiz)||(sBiz&&eHome))return 'private';
+  // Kontor → någonstans = Tjänst
+  if(sBiz||eBiz)return 'business';
+  // Automiles egna märkning
   if(t.importedType)return t.importedType;
-  if(m(s,priv)&&m(e,priv))return 'private';
+  // Hem→Hem eller kända privatadresser
+  if((sHome&&eHome)||(m(s,priv)&&m(e,priv)))return 'private';
   return 'unclassified';
 }
 
@@ -453,7 +460,7 @@ function removeAddr(i){STATE.addresses.splice(i,1);save();renderAddrs();}
 function renderAddrs(){
   const el=document.getElementById('addrList');
   if(!STATE.addresses.length){el.innerHTML='<p style="font-size:12px;color:var(--text3);padding:4px 0;">Inga adresser tillagda ännu.</p>';return;}
-  el.innerHTML=STATE.addresses.map((a,i)=>'<div class="addr-item"><span>'+esc(a.label)+'</span><span class="addr-badge '+(a.type==='business'?'ab-biz':'ab-priv')+'">'+(a.type==='business'?'Tjänst':'Privat')+'</span><button class="rm" onclick="removeAddr('+i+')">×</button></div>').join('');
+  el.innerHTML=STATE.addresses.map((a,i)=>'<div class="addr-item"><span>'+esc(a.label)+'</span><span class="addr-badge '+(a.type==='business'?'ab-biz':a.type==='home'?'ab-home':'ab-priv')+'">'+(a.type==='business'?'Kontor':a.type==='home'?'🏠 Hem':'Privat')+'</span><button class="rm" onclick="removeAddr('+i+')">×</button></div>').join('');
 }
 
 function fmtDate(s){if(!s)return '—';const d=new Date(s);return isNaN(d)?s:d.toLocaleDateString('sv-SE')+' '+d.toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'});}
