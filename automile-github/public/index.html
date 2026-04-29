@@ -234,8 +234,18 @@ function handleFile(file){
   const name=file.name.toLowerCase();
   if(name.endsWith('.xlsx')||name.endsWith('.xls')){
     const reader=new FileReader();
-    reader.onload=e=>parseXLSX(e.target.result);
-    reader.readAsArrayBuffer(file);
+    reader.onload=e=>{
+      try{
+        // Use binary string + raw:true to skip all style processing
+        const wb=XLSX.read(e.target.result,{type:'binary',cellDates:true,cellStyles:false,raw:false,sheetStubs:false});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false,blankrows:false});
+        parseXLSX(rows);
+      }catch(err){
+        showAlert('importAlert','❌ Kunde inte läsa Excel-filen: '+err.message,'err');
+      }
+    };
+    reader.readAsBinaryString(file);
   } else if(name.endsWith('.csv')){
     const reader=new FileReader();
     reader.onload=e=>parseCSV(e.target.result);
@@ -245,12 +255,9 @@ function handleFile(file){
   }
 }
 
-function parseXLSX(buf){
+function parseXLSX(rows){
   try {
-    const wb=XLSX.read(buf,{type:'arraybuffer',cellDates:true,cellStyles:false});
-    const ws=wb.Sheets[wb.SheetNames[0]];
-    const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    if(rows.length<2){showAlert('importAlert','❌ Tom fil.','err');return;}
+    if(!rows||rows.length<2){showAlert('importAlert','❌ Tom fil.','err');return;}
 
     // Find header row dynamically — Automile puts headers on row 8
     let headerRowIdx=0;
@@ -316,7 +323,7 @@ function parseXLSX(buf){
     showAlert('importAlert','✅ '+trips.length+' körningar importerade. '+trips.filter(t=>effectiveType(t)!=='unclassified').length+' auto-klassade.','ok');
     setTimeout(()=>showTab('trips',document.querySelectorAll('.tab')[0]),700);
   } catch(e){
-    showAlert('importAlert','❌ Kunde inte läsa Excel-filen: '+e.message,'err');
+    showAlert('importAlert','❌ Fel vid tolkning av Excel: '+e.message,'err');
   }
 }
 
