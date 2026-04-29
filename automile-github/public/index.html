@@ -630,138 +630,80 @@ function exportExcel(){
   const periodFrom=STATE.trips.reduce((a,t)=>t.date<a?t.date:a,STATE.trips[0].date).slice(0,10);
   const periodTo=STATE.trips.reduce((a,t)=>t.date>a?t.date:a,STATE.trips[0].date).slice(0,10);
 
-  const GREEN_DARK='2A4125',GREEN_MID='3d6037',GREEN_LIGHT='EAF2E8';
-  const AMBER_DARK='8b634b',AMBER_LIGHT='FDF3EC';
-  const BLUE_DARK='1a3a5c',BLUE_LIGHT='EAF1FA';
-  const WHITE='FFFFFFFF';
-
-  // Helper: cell style objects for SheetJS
-  function hdrStyle(bg){try{return{font:{name:'Calibri',bold:true,sz:10,color:{rgb:WHITE}},fill:{patternType:'solid',fgColor:{rgb:bg}},alignment:{horizontal:'left',vertical:'center'},border:{top:{style:'thin',color:{rgb:'D0D0D0'}},bottom:{style:'thin',color:{rgb:'D0D0D0'}},left:{style:'thin',color:{rgb:'D0D0D0'}},right:{style:'thin',color:{rgb:'D0D0D0'}}}};}catch(e){return{};}}
-  function cellStyle(bg,bold,color){return{font:{name:'Calibri',sz:10,bold:!!bold,color:{rgb:color||'333333'}},fill:{patternType:'solid',fgColor:{rgb:bg||WHITE}},alignment:{vertical:'center'},border:{top:{style:'thin',color:{rgb:'D0D0D0'}},bottom:{style:'thin',color:{rgb:'D0D0D0'}},left:{style:'thin',color:{rgb:'D0D0D0'}},right:{style:'thin',color:{rgb:'D0D0D0'}}}};}
-  function titleStyle(bg){return{font:{name:'Calibri',bold:true,sz:18,color:{rgb:WHITE}},fill:{patternType:'solid',fgColor:{rgb:bg}},alignment:{vertical:'center'}};}
-
-  function buildSheet(data,label,accentDark,accentMid,accentLight){
-    const aoa=[];
-    // Rows 1-4: header block (merged later via !merges)
-    aoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:accentDark}}}},'','','','']);
-    aoa.push([{v:'Körjournal — '+label,s:titleStyle(accentDark)},'','','','']);
-    aoa.push([{v:'Period: '+periodFrom+' – '+periodTo+'   ·   Förare: Jimmy Blomgren',s:{font:{name:'Calibri',sz:10,color:{rgb:'CCDDCC'}},fill:{patternType:'solid',fgColor:{rgb:accentDark}},alignment:{vertical:'center'}}},'','','','']);
-    aoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:accentDark}}}},'','','','']);
-    // Row 5: spacer
-    aoa.push(['','','','','']);
-    // Row 6: summary
-    aoa.push([
-      {v:'Antal körningar:  '+data.length,s:cellStyle(accentLight,true,accentDark)},
-      {v:'Total sträcka:  '+totalKm(data).toFixed(1)+' km',s:cellStyle(accentLight,true,accentDark)},
-      '','',''
-    ]);
-    // Row 7: column headers
-    const hdrs=['Datum & tid','Startadress','Slutadress','Km','Anteckning'];
-    aoa.push(hdrs.map(h=>({v:h,s:hdrStyle(accentMid)})));
-    // Data rows
-    data.forEach((t,i)=>{
-      const alt=i%2===1;
-      const bg=alt?accentLight:WHITE;
-      aoa.push([
-        {v:t.date||'',s:cellStyle(bg)},
-        {v:String(t.from||'').replace(', Sverige',''),s:cellStyle(bg)},
-        {v:String(t.to||'').replace(', Sverige',''),s:cellStyle(bg)},
-        {v:parseFloat((t.km||0).toFixed(1)),s:{...cellStyle(bg),alignment:{horizontal:'right',vertical:'center'},numFmt:'0.0'}},
-        {v:String(t.note||''),s:cellStyle(bg)},
+  function makeSheet(data, label){
+    const rows=[
+      ['Körjournal — '+label],
+      ['Period: '+periodFrom+' – '+periodTo+'   Förare: Jimmy Blomgren'],
+      [],
+      ['Antal körningar: '+data.length+'   Total sträcka: '+totalKm(data).toFixed(0)+' km'],
+      [],
+      ['Datum & tid','Startadress','Slutadress','Km','Anteckning'],
+    ];
+    data.forEach(t=>{
+      rows.push([
+        t.date||'',
+        (t.from||'').replace(', Sverige',''),
+        (t.to||'').replace(', Sverige',''),
+        parseFloat(t.km.toFixed(1)),
+        t.note||''
       ]);
     });
-    // Total row
-    aoa.push([
-      {v:'TOTALT',s:cellStyle(accentDark,true,WHITE)},
-      {v:'',s:cellStyle(accentDark)},
-      {v:'',s:cellStyle(accentDark)},
-      {v:parseFloat(totalKm(data).toFixed(1)),s:{...cellStyle(accentDark,true,WHITE),alignment:{horizontal:'right',vertical:'center'},numFmt:'0.0'}},
-      {v:'',s:cellStyle(accentDark)},
-    ]);
-    // Footer
-    aoa.push(['','','','','']);
-    aoa.push([{v:'Genererad '+new Date().toISOString().slice(0,10)+' via Körjournal-appen',s:{font:{name:'Calibri',sz:8,italic:true,color:{rgb:'AAAAAA'}}}},'','','','']);
-
-    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    rows.push([]);
+    rows.push(['TOTALT','','',parseFloat(totalKm(data).toFixed(1)),'']);
+    rows.push([]);
+    rows.push(['Genererad '+new Date().toISOString().slice(0,10)+' via Körjournal-appen']);
+    const ws=XLSX.utils.aoa_to_sheet(rows);
     ws['!cols']=[{wch:20},{wch:38},{wch:38},{wch:10},{wch:24}];
-    ws['!rows']=[{hpt:10},{hpt:28},{hpt:16},{hpt:10},{hpt:6},{hpt:22},{hpt:20}];
-    ws['!merges']=[
-      {s:{r:1,c:0},e:{r:1,c:4}},
-      {s:{r:2,c:0},e:{r:2,c:4}},
-      {s:{r:5,c:0},e:{r:5,c:1}},
-      {s:{r:5,c:2},e:{r:5,c:4}},
-    ];
     return ws;
   }
 
-  function buildSummary(){
-    const aoa=[];
-    aoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','']);
-    aoa.push([{v:'Körjournal — Sammanfattning',s:titleStyle(BLUE_DARK)},'','']);
-    aoa.push([{v:'Period: '+periodFrom+' – '+periodTo,s:{font:{name:'Calibri',sz:10,color:{rgb:'AACCDD'}},fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}},alignment:{vertical:'center'}}},'','']);
-    aoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','']);
-    aoa.push(['','','']);
+  function makeSummary(){
     const rows=[
-      ['',{v:'Antal körningar',s:cellStyle('E8F0F8',true,BLUE_DARK)},{v:'Kilometer',s:cellStyle('E8F0F8',true,BLUE_DARK)}],
-      [{v:'Tjänsteresor',s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)},{v:biz.length,s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)},{v:totalKm(biz).toFixed(1)+' km',s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)}],
-      [{v:'Privatresor',s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)},{v:priv.length,s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)},{v:totalKm(priv).toFixed(1)+' km',s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)}],
-      [{v:'Totalt',s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)},{v:STATE.trips.length,s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)},{v:totalKm(STATE.trips).toFixed(1)+' km',s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)}],
-      ['','',''],
-      [{v:'Pendling',s:cellStyle('F0E8FA',true,'5b21b6')},{v:(STATE.commuteDays||0)+' dagar',s:cellStyle('F0E8FA',false,'5b21b6')},{v:(STATE.commuteKm||0).toFixed(1)+' km',s:cellStyle('F0E8FA',false,'5b21b6')}],
+      ['Körjournal — Sammanfattning'],
+      ['Period: '+periodFrom+' – '+periodTo],
+      [],
+      ['','Antal körningar','Kilometer'],
+      ['Tjänsteresor',biz.length,parseFloat(totalKm(biz).toFixed(1))],
+      ['Privatresor',priv.length,parseFloat(totalKm(priv).toFixed(1))],
+      ['Totalt',STATE.trips.length,parseFloat(totalKm(STATE.trips).toFixed(1))],
     ];
-    rows.forEach(r=>aoa.push(r));
-    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    if(STATE.commuteDays){
+      rows.push([]);
+      rows.push(['Pendling (skatteunderlag)',STATE.commuteDays+' dagar',parseFloat((STATE.commuteKm||0).toFixed(1))]);
+    }
+    const ws=XLSX.utils.aoa_to_sheet(rows);
     ws['!cols']=[{wch:24},{wch:18},{wch:16}];
-    ws['!merges']=[
-      {s:{r:1,c:0},e:{r:1,c:2}},
-      {s:{r:2,c:0},e:{r:2,c:2}},
+    return ws;
+  }
+
+  function makePendling(){
+    if(!STATE.commuteChains||!STATE.commuteChains.length)return null;
+    const rows=[
+      ['Pendlingsunderlag'],
+      ['Period: '+periodFrom+' – '+periodTo],
+      ['Pendlingsdagar: '+STATE.commuteDays+'   Total km: '+STATE.commuteKm.toFixed(0)+' km'],
+      [],
+      ['Datum','Reskedja','Km','Antal stopp'],
     ];
+    STATE.commuteChains.forEach(c=>{
+      const chain=c.trips.map((t,j)=>j===0?t.from.replace(', Sverige',''):t.to.replace(', Sverige','')).join(' → ');
+      rows.push([c.day,chain,parseFloat(c.km.toFixed(1)),c.trips.length+1]);
+    });
+    rows.push([]);
+    rows.push(['TOTALT','',parseFloat(STATE.commuteKm.toFixed(1)),'']);
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols']=[{wch:14},{wch:60},{wch:10},{wch:12}];
     return ws;
   }
 
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,buildSummary(),'Sammanfattning');
-  XLSX.utils.book_append_sheet(wb,buildSheet(biz,'Tjänsteresor',GREEN_DARK,GREEN_MID,GREEN_LIGHT),'Tjänsteresor');
-  XLSX.utils.book_append_sheet(wb,buildSheet(priv,'Privatresor',AMBER_DARK,AMBER_DARK,AMBER_LIGHT),'Privatresor');
-
-  // Pendlingsblad
-  if(STATE.commuteChains&&STATE.commuteChains.length>0){
-    const paoa=[];
-    paoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','','']);
-    paoa.push([{v:'Pendlingsunderlag',s:titleStyle(BLUE_DARK)},'','','']);
-    paoa.push([{v:'Period: '+periodFrom+' – '+periodTo,s:{font:{name:'Calibri',sz:10,color:{rgb:'AACCDD'}},fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','','']);
-    paoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','','']);
-    paoa.push(['','','','']);
-    paoa.push([
-      {v:'Pendlingsdagar: '+STATE.commuteDays,s:cellStyle('EAF1FA',true,BLUE_DARK)},
-      {v:'Total km: '+STATE.commuteKm.toFixed(0)+' km',s:cellStyle('EAF1FA',true,BLUE_DARK)},
-      '','']);
-    paoa.push([{v:'Datum',s:hdrStyle('1a3a5c')},{v:'Reskedja',s:hdrStyle('1a3a5c')},{v:'Km',s:hdrStyle('1a3a5c')},{v:'Antal stopp',s:hdrStyle('1a3a5c')}]);
-    STATE.commuteChains.forEach((c,i)=>{
-      const alt=i%2===1;
-      const bg=alt?'EAF1FA':WHITE;
-      const chain=c.trips.map((t,j)=>j===0?t.from.replace(', Sverige',''):t.to.replace(', Sverige','')).join(' → ');
-      paoa.push([
-        {v:c.day,s:cellStyle(bg)},
-        {v:chain,s:{...cellStyle(bg),alignment:{wrapText:true,vertical:'center'}}},
-        {v:parseFloat(c.km.toFixed(1)),s:{...cellStyle(bg),alignment:{horizontal:'right'},numFmt:'0.0'}},
-        {v:c.trips.length+1,s:{...cellStyle(bg),alignment:{horizontal:'center'}}},
-      ]);
-    });
-    paoa.push([
-      {v:'TOTALT',s:cellStyle(BLUE_DARK,true,WHITE)},
-      {v:'',s:cellStyle(BLUE_DARK)},
-      {v:parseFloat(STATE.commuteKm.toFixed(1)),s:{...cellStyle(BLUE_DARK,true,WHITE),alignment:{horizontal:'right'},numFmt:'0.0'}},
-      {v:'',s:cellStyle(BLUE_DARK)},
-    ]);
-    const pws=XLSX.utils.aoa_to_sheet(paoa);
-    pws['!cols']=[{wch:14},{wch:60},{wch:10},{wch:12}];
-    pws['!merges']=[{s:{r:1,c:0},e:{r:1,c:3}},{s:{r:2,c:0},e:{r:2,c:3}},{s:{r:5,c:0},e:{r:5,c:1}}];
-    XLSX.utils.book_append_sheet(wb,pws,'Pendling');
-  }
+  XLSX.utils.book_append_sheet(wb,makeSummary(),'Sammanfattning');
+  XLSX.utils.book_append_sheet(wb,makeSheet(biz,'Tjänsteresor'),'Tjänsteresor');
+  XLSX.utils.book_append_sheet(wb,makeSheet(priv,'Privatresor'),'Privatresor');
+  const pendling=makePendling();
+  if(pendling)XLSX.utils.book_append_sheet(wb,pendling,'Pendling');
   XLSX.writeFile(wb,'korjournal_'+periodFrom+'_'+periodTo+'.xlsx');
 }
-
 function clearAll(){if(!confirm('Rensa alla körningar?'))return;STATE.trips=[];STATE.selected.clear();save();updateStats();renderTable();}
 
 function addAddr(){const val=document.getElementById('newAddr').value.trim();if(!val)return;STATE.addresses.push({label:val,type:document.getElementById('newAddrType').value});document.getElementById('newAddr').value='';save();renderAddrs();}
