@@ -68,7 +68,7 @@ tr:hover td{background:#ffffff05}
 .addr-item{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:7px;margin-bottom:6px}
 .addr-item span{flex:1;font-size:12px}
 .addr-badge{font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700}
-.ab-biz{background:#1a2f1a;color:var(--green)}.ab-home{background:#1a2040;color:var(--blue)}.ab-priv{background:#2a1f0f;color:var(--amber)}
+.ab-biz{background:#1a2f1a;color:var(--green)}.ab-home{background:#1a2040;color:var(--blue)}.ab-drop{background:#2a1a30;color:#c084fc}.ab-priv{background:#2a1f0f;color:var(--amber)}
 .rm{background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;padding:1px 4px;border-radius:3px}
 .rm:hover{color:var(--red)}
 .add-row{display:flex;gap:8px;flex-wrap:wrap}
@@ -189,7 +189,7 @@ select option{background:var(--surface2)}
       <hr class="divider">
       <div class="add-row">
         <input type="text" id="newAddr" placeholder="Offerdalsvägen 7, Krokom">
-        <select id="newAddrType"><option value="business">Kontor/Tjänst</option><option value="home">Hemadress</option><option value="private">Privat övrigt</option></select>
+        <select id="newAddrType"><option value="business">Kontor/Tjänst</option><option value="home">Hemadress</option><option value="dropoff">Dagis/Stopp</option><option value="private">Privat övrigt</option></select>
         <button class="btn btn-secondary btn-sm" onclick="addAddr()">+ Lägg till</button>
       </div>
     </div>
@@ -385,22 +385,24 @@ function autoClassify(t){
   const s=(t.from||'').toLowerCase(),e=(t.to||'').toLowerCase();
   const biz=STATE.addresses.filter(a=>a.type==='business').map(a=>a.label.toLowerCase());
   const home=STATE.addresses.filter(a=>a.type==='home').map(a=>a.label.toLowerCase());
+  const drop=STATE.addresses.filter(a=>a.type==='dropoff').map(a=>a.label.toLowerCase());
   const priv=STATE.addresses.filter(a=>a.type==='private').map(a=>a.label.toLowerCase());
   const m=(addr,list)=>list.some(l=>{const parts=l.split(/[\s,]+/).filter(p=>p.length>3);return parts.length>0&&parts.some(p=>addr.includes(p));});
-  const sBiz=m(s,biz),eBiz=m(e,biz),sHome=m(s,home),eHome=m(e,home);
-  // Hem → Kontor eller Kontor → Hem = pendling = Privat
+  // Hem/Dagis-adresser behandlas lika för pendlingslogik
+  const homelike=[...home,...drop];
+  const sBiz=m(s,biz),eBiz=m(e,biz);
+  const sHome=m(s,homelike),eHome=m(e,homelike);
+  // Hem/Dagis ↔ Kontor = pendling = Privat
   if((sHome&&eBiz)||(sBiz&&eHome))return 'private';
-  // Kontor → var som helst (utom Hem) = Tjänst
+  // Kontor → var som helst (utom hem/dagis) = Tjänst
   if(sBiz&&!eHome)return 'business';
-  // Var som helst → Kontor (utom Hem) = Tjänst
+  // Var som helst → Kontor (utom hem/dagis) = Tjänst
   if(eBiz&&!sHome)return 'business';
-  // Hem → Hem = Privat
+  // Hem/Dagis → Hem/Dagis = Privat (pendlingskedja)
   if(sHome&&eHome)return 'private';
-  // Hem → okänd eller okänd → Hem = Privat
+  // Hem/Dagis → okänd = Privat
   if(sHome||eHome)return 'private';
-  // Automiles egna märkning
   if(t.importedType)return t.importedType;
-  // Kända privatadresser
   if(m(s,priv)||m(e,priv))return 'private';
   return 'unclassified';
 }
@@ -423,6 +425,92 @@ function updateStats(){
   document.getElementById('sBizKm').textContent=bizKm.toFixed(0)+' km';
   document.getElementById('sPrivKm').textContent=privKm.toFixed(0)+' km';
   document.getElementById('sUnclass').textContent=unclass;
+  computeCommute();
+}
+
+function computeCommute(){
+  const home=STATE.addresses.filter(a=>a.type==='home').map(a=>a.label.toLowerCase());
+  const drop=STATE.addresses.filter(a=>a.type==='dropoff').map(a=>a.label.toLowerCase());
+  const biz=STATE.addresses.filter(a=>a.type==='business').map(a=>a.label.toLowerCase());
+  if(!home.length&&!drop.length){document.getElementById('commutePanel').style.display='none';return;}
+  document.getElementById('commutePanel').style.display='block';
+
+  const m=(addr,list)=>list.some(l=>{const parts=l.split(/[\s,]+/).filter(p=>p.length>3);return parts.length>0&&parts.some(p=>addr.includes(p));});
+  const homelike=[...home,...drop];
+
+  // Sort trips by date
+  const sorted=[...STATE.trips].sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+  // Group into commute chains
+  // A chain = consecutive trips on same day where each trip connects to the next
+  // and the chain starts or ends at home/dropoff touching biz
+  const chains=[];
+  let i=0;
+  while(i<sorted.length){
+    const t=sorted[i];
+    const s=(t.from||'').toLowerCase(),e=(t.to||'').toLowerCase();
+    const day=t.date.slice(0,10);
+
+    // Start of morning chain: from home/drop toward biz (possibly via drop)
+    if(m(s,homelike)){
+      const chain=[t];
+      let j=i+1;
+      // Follow chain: next trip same day starting where this one ended
+      while(j<sorted.length&&sorted[j].date.slice(0,10)===day){
+        const prev=chain[chain.length-1];
+        const nextTrip=sorted[j];
+        const prevEnd=(prev.to||'').toLowerCase();
+        const nextStart=(nextTrip.from||'').toLowerCase();
+        // Check if next trip starts near where previous ended
+        const connected=prevEnd.split(/[\s,]+/).filter(p=>p.length>3).some(p=>nextStart.includes(p))
+          ||nextStart.split(/[\s,]+/).filter(p=>p.length>3).some(p=>prevEnd.includes(p));
+        if(connected&&(m(nextStart,homelike)||m(prevEnd,homelike)||m(nextStart,biz)||m(prevEnd,biz))){
+          chain.push(nextTrip);j++;
+        } else break;
+      }
+      // Valid commute: chain touches both homelike and biz
+      const allAddrs=chain.flatMap(t=>[(t.from||'').toLowerCase(),(t.to||'').toLowerCase()]);
+      if(allAddrs.some(a=>m(a,homelike))&&allAddrs.some(a=>m(a,biz))){
+        chains.push({day,trips:chain,km:chain.reduce((s,t)=>s+t.km,0)});
+        i=j;continue;
+      }
+    }
+    // Start of evening chain: from biz toward home (possibly via drop/svärföräldrar)
+    if(m(s,biz)){
+      const chain=[t];
+      let j=i+1;
+      while(j<sorted.length&&sorted[j].date.slice(0,10)===day){
+        const prev=chain[chain.length-1];
+        const nextTrip=sorted[j];
+        const prevEnd=(prev.to||'').toLowerCase();
+        const nextStart=(nextTrip.from||'').toLowerCase();
+        const connected=prevEnd.split(/[\s,]+/).filter(p=>p.length>3).some(p=>nextStart.includes(p))
+          ||nextStart.split(/[\s,]+/).filter(p=>p.length>3).some(p=>prevEnd.includes(p));
+        if(connected){chain.push(nextTrip);j++;}
+        else break;
+      }
+      const allAddrs=chain.flatMap(t=>[(t.from||'').toLowerCase(),(t.to||'').toLowerCase()]);
+      if(allAddrs.some(a=>m(a,homelike))&&allAddrs.some(a=>m(a,biz))){
+        chains.push({day,trips:chain,km:chain.reduce((s,t)=>s+t.km,0)});
+        i=j;continue;
+      }
+    }
+    i++;
+  }
+
+  // Count unique days and total km
+  const days=new Set(chains.map(c=>c.day));
+  const totalKm=chains.reduce((s,c)=>s+c.km,0);
+  const avgKm=days.size>0?totalKm/days.size:0;
+
+  document.getElementById('cDays').textContent=days.size;
+  document.getElementById('cKm').textContent=totalKm.toFixed(0)+' km';
+  document.getElementById('cAvg').textContent=avgKm.toFixed(1)+' km';
+
+  // Store for export
+  STATE.commuteChains=chains;
+  STATE.commuteDays=days.size;
+  STATE.commuteKm=totalKm;
 }
 
 function renderTable(){
@@ -544,6 +632,8 @@ function exportExcel(){
       [{v:'Tjänsteresor',s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)},{v:biz.length,s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)},{v:totalKm(biz).toFixed(1)+' km',s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)}],
       [{v:'Privatresor',s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)},{v:priv.length,s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)},{v:totalKm(priv).toFixed(1)+' km',s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)}],
       [{v:'Totalt',s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)},{v:STATE.trips.length,s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)},{v:totalKm(STATE.trips).toFixed(1)+' km',s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)}],
+      ['','',''],
+      [{v:'Pendling',s:cellStyle('F0E8FA',true,'5b21b6')},{v:(STATE.commuteDays||0)+' dagar',s:cellStyle('F0E8FA',false,'5b21b6')},{v:(STATE.commuteKm||0).toFixed(1)+' km',s:cellStyle('F0E8FA',false,'5b21b6')}],
     ];
     rows.forEach(r=>aoa.push(r));
     const ws=XLSX.utils.aoa_to_sheet(aoa);
@@ -559,6 +649,42 @@ function exportExcel(){
   XLSX.utils.book_append_sheet(wb,buildSummary(),'Sammanfattning');
   XLSX.utils.book_append_sheet(wb,buildSheet(biz,'Tjänsteresor',GREEN_DARK,GREEN_MID,GREEN_LIGHT),'Tjänsteresor');
   XLSX.utils.book_append_sheet(wb,buildSheet(priv,'Privatresor',AMBER_DARK,AMBER_DARK,AMBER_LIGHT),'Privatresor');
+
+  // Pendlingsblad
+  if(STATE.commuteChains&&STATE.commuteChains.length>0){
+    const paoa=[];
+    paoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','','']);
+    paoa.push([{v:'Pendlingsunderlag',s:titleStyle(BLUE_DARK)},'','','']);
+    paoa.push([{v:'Period: '+periodFrom+' – '+periodTo,s:{font:{name:'Calibri',sz:10,color:{rgb:'AACCDD'}},fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','','']);
+    paoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','','']);
+    paoa.push(['','','','']);
+    paoa.push([
+      {v:'Pendlingsdagar: '+STATE.commuteDays,s:cellStyle('EAF1FA',true,BLUE_DARK)},
+      {v:'Total km: '+STATE.commuteKm.toFixed(0)+' km',s:cellStyle('EAF1FA',true,BLUE_DARK)},
+      '','']);
+    paoa.push([{v:'Datum',s:hdrStyle('1a3a5c')},{v:'Reskedja',s:hdrStyle('1a3a5c')},{v:'Km',s:hdrStyle('1a3a5c')},{v:'Antal stopp',s:hdrStyle('1a3a5c')}]);
+    STATE.commuteChains.forEach((c,i)=>{
+      const alt=i%2===1;
+      const bg=alt?'EAF1FA':WHITE;
+      const chain=c.trips.map((t,j)=>j===0?t.from.replace(', Sverige',''):t.to.replace(', Sverige','')).join(' → ');
+      paoa.push([
+        {v:c.day,s:cellStyle(bg)},
+        {v:chain,s:{...cellStyle(bg),alignment:{wrapText:true,vertical:'center'}}},
+        {v:parseFloat(c.km.toFixed(1)),s:{...cellStyle(bg),alignment:{horizontal:'right'},numFmt:'0.0'}},
+        {v:c.trips.length+1,s:{...cellStyle(bg),alignment:{horizontal:'center'}}},
+      ]);
+    });
+    paoa.push([
+      {v:'TOTALT',s:cellStyle(BLUE_DARK,true,WHITE)},
+      {v:'',s:cellStyle(BLUE_DARK)},
+      {v:parseFloat(STATE.commuteKm.toFixed(1)),s:{...cellStyle(BLUE_DARK,true,WHITE),alignment:{horizontal:'right'},numFmt:'0.0'}},
+      {v:'',s:cellStyle(BLUE_DARK)},
+    ]);
+    const pws=XLSX.utils.aoa_to_sheet(paoa);
+    pws['!cols']=[{wch:14},{wch:60},{wch:10},{wch:12}];
+    pws['!merges']=[{s:{r:1,c:0},e:{r:1,c:3}},{s:{r:2,c:0},e:{r:2,c:3}},{s:{r:5,c:0},e:{r:5,c:1}}];
+    XLSX.utils.book_append_sheet(wb,pws,'Pendling');
+  }
   XLSX.writeFile(wb,'korjournal_'+periodFrom+'_'+periodTo+'.xlsx');
 }
 
@@ -569,7 +695,7 @@ function removeAddr(i){STATE.addresses.splice(i,1);save();renderAddrs();}
 function renderAddrs(){
   const el=document.getElementById('addrList');
   if(!STATE.addresses.length){el.innerHTML='<p style="font-size:12px;color:var(--text3);padding:4px 0;">Inga adresser tillagda ännu.</p>';return;}
-  el.innerHTML=STATE.addresses.map((a,i)=>'<div class="addr-item"><span>'+esc(a.label)+'</span><span class="addr-badge '+(a.type==='business'?'ab-biz':a.type==='home'?'ab-home':'ab-priv')+'">'+(a.type==='business'?'Kontor':a.type==='home'?'🏠 Hem':'Privat')+'</span><button class="rm" onclick="removeAddr('+i+')">×</button></div>').join('');
+  el.innerHTML=STATE.addresses.map((a,i)=>'<div class="addr-item"><span>'+esc(a.label)+'</span><span class="addr-badge '+(a.type==='business'?'ab-biz':a.type==='home'?'ab-home':a.type==='dropoff'?'ab-drop':'ab-priv')+'">'+(a.type==='business'?'Kontor':a.type==='home'?'🏠 Hem':a.type==='dropoff'?'🧒 Dagis':'Privat')+'</span><button class="rm" onclick="removeAddr('+i+')">×</button></div>').join('');
 }
 
 function fmtDate(s){if(!s)return '—';const d=new Date(s);return isNaN(d)?s:d.toLocaleDateString('sv-SE')+' '+d.toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'});}
