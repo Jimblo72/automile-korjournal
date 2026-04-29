@@ -238,7 +238,14 @@ function handleFile(file){
     const reader=new FileReader();
     reader.onload=async e=>{
       try{
-        const base64=btoa(String.fromCharCode(...new Uint8Array(e.target.result)));
+        // Chunked base64 - fungerar på stora filer
+        const bytes=new Uint8Array(e.target.result);
+        let binary='';
+        const chunk=8192;
+        for(let i=0;i<bytes.length;i+=chunk){
+          binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length)));
+        }
+        const base64=btoa(binary);
         const res=await fetch('/.netlify/functions/parse_excel',{
           method:'POST',
           headers:{'Content-Type':'application/octet-stream'},
