@@ -109,6 +109,19 @@ select option{background:var(--surface2)}
 
 <!-- TRIPS -->
 <div class="panel active" id="tab-trips">
+  <div id="commutePanel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 20px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      <div>
+        <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">🚗 Pendling (skatteunderlag)</div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+          <div><span style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:var(--blue);" id="cDays">—</span><span style="font-size:12px;color:var(--text3);margin-left:4px;">pendlingsdagar</span></div>
+          <div><span style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:var(--blue);" id="cKm">—</span><span style="font-size:12px;color:var(--text3);margin-left:4px;">km totalt</span></div>
+          <div><span style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:var(--blue);" id="cAvg">—</span><span style="font-size:12px;color:var(--text3);margin-left:4px;">km/dag snitt</span></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);max-width:280px;line-height:1.6;">Kedjor: Hem→Dagis→Kontor och Kontor→Svärföräldrar→Hem räknas som en pendlingsdag.</div>
+    </div>
+  </div>
   <div id="tripsAlert" class="alert"></div>
   <div class="stats">
     <div class="stat"><div class="stat-label">Totalt körningar</div><div class="stat-value c-blue" id="sTotal">—</div></div>
