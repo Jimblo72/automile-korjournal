@@ -125,7 +125,8 @@ select option{background:var(--surface2)}
     <input type="text" id="searchInput" placeholder="🔍  Sök adress..." oninput="renderTable()" style="padding:7px 11px;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:Sora,sans-serif;font-size:13px;outline:none;width:220px;">
     <div style="margin-left:auto;display:flex;gap:8px;">
       <button class="btn btn-secondary btn-sm" onclick="reclassifyAll()">↻ Omklassificera</button>
-      <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ Exportera CSV</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ CSV</button>
+      <button class="btn btn-primary btn-sm" onclick="exportExcel()">📊 Exportera Excel</button>
       <button class="btn btn-secondary btn-sm" onclick="clearAll()" style="color:var(--red);">🗑 Rensa</button>
     </div>
   </div>
@@ -457,6 +458,108 @@ function exportCSV(){
   STATE.trips.forEach(t=>{const tp=effectiveType(t);rows.push([fmtDate(t.date),t.from||'',t.to||'',t.km.toFixed(1),tp==='business'?'Tjänst':tp==='private'?'Privat':'Ej klassad',t.note||'']);});
   const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));a.download='korjournal_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+}
+
+function exportExcel(){
+  if(!STATE.trips.length){showAlert('tripsAlert','Inga körningar att exportera.','err');return;}
+  const biz=STATE.trips.filter(t=>effectiveType(t)==='business');
+  const priv=STATE.trips.filter(t=>effectiveType(t)==='private');
+  const totalKm=arr=>arr.reduce((s,t)=>s+t.km,0);
+  const periodFrom=STATE.trips.reduce((a,t)=>t.date<a?t.date:a,STATE.trips[0].date).slice(0,10);
+  const periodTo=STATE.trips.reduce((a,t)=>t.date>a?t.date:a,STATE.trips[0].date).slice(0,10);
+
+  const GREEN_DARK='2A4125',GREEN_MID='3d6037',GREEN_LIGHT='EAF2E8';
+  const AMBER_DARK='8b634b',AMBER_LIGHT='FDF3EC';
+  const BLUE_DARK='1a3a5c',BLUE_LIGHT='EAF1FA';
+  const WHITE='FFFFFFFF';
+
+  // Helper: cell style objects for SheetJS
+  function hdrStyle(bg){return{font:{name:'Calibri',bold:true,sz:10,color:{rgb:WHITE}},fill:{patternType:'solid',fgColor:{rgb:bg}},alignment:{horizontal:'left',vertical:'center'},border:{top:{style:'thin',color:{rgb:'D0D0D0'}},bottom:{style:'thin',color:{rgb:'D0D0D0'}},left:{style:'thin',color:{rgb:'D0D0D0'}},right:{style:'thin',color:{rgb:'D0D0D0'}}}};}
+  function cellStyle(bg,bold,color){return{font:{name:'Calibri',sz:10,bold:!!bold,color:{rgb:color||'333333'}},fill:{patternType:'solid',fgColor:{rgb:bg||WHITE}},alignment:{vertical:'center'},border:{top:{style:'thin',color:{rgb:'D0D0D0'}},bottom:{style:'thin',color:{rgb:'D0D0D0'}},left:{style:'thin',color:{rgb:'D0D0D0'}},right:{style:'thin',color:{rgb:'D0D0D0'}}}};}
+  function titleStyle(bg){return{font:{name:'Calibri',bold:true,sz:18,color:{rgb:WHITE}},fill:{patternType:'solid',fgColor:{rgb:bg}},alignment:{vertical:'center'}};}
+
+  function buildSheet(data,label,accentDark,accentMid,accentLight){
+    const aoa=[];
+    // Rows 1-4: header block (merged later via !merges)
+    aoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:accentDark}}}},'','','','']);
+    aoa.push([{v:'Körjournal — '+label,s:titleStyle(accentDark)},'','','','']);
+    aoa.push([{v:'Period: '+periodFrom+' – '+periodTo+'   ·   Förare: Jimmy Blomgren',s:{font:{name:'Calibri',sz:10,color:{rgb:'CCDDCC'}},fill:{patternType:'solid',fgColor:{rgb:accentDark}},alignment:{vertical:'center'}}},'','','','']);
+    aoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:accentDark}}}},'','','','']);
+    // Row 5: spacer
+    aoa.push(['','','','','']);
+    // Row 6: summary
+    aoa.push([
+      {v:'Antal körningar:  '+data.length,s:cellStyle(accentLight,true,accentDark)},
+      {v:'Total sträcka:  '+totalKm(data).toFixed(1)+' km',s:cellStyle(accentLight,true,accentDark)},
+      '','',''
+    ]);
+    // Row 7: column headers
+    const hdrs=['Datum & tid','Startadress','Slutadress','Km','Anteckning'];
+    aoa.push(hdrs.map(h=>({v:h,s:hdrStyle(accentMid)})));
+    // Data rows
+    data.forEach((t,i)=>{
+      const alt=i%2===1;
+      const bg=alt?accentLight:WHITE;
+      aoa.push([
+        {v:t.date,s:cellStyle(bg)},
+        {v:(t.from||'').replace(', Sverige',''),s:cellStyle(bg)},
+        {v:(t.to||'').replace(', Sverige',''),s:cellStyle(bg)},
+        {v:parseFloat(t.km.toFixed(1)),s:{...cellStyle(bg),alignment:{horizontal:'right',vertical:'center'},numFmt:'0.0'}},
+        {v:t.note||'',s:cellStyle(bg)},
+      ]);
+    });
+    // Total row
+    aoa.push([
+      {v:'TOTALT',s:cellStyle(accentDark,true,WHITE)},
+      {v:'',s:cellStyle(accentDark)},
+      {v:'',s:cellStyle(accentDark)},
+      {v:parseFloat(totalKm(data).toFixed(1)),s:{...cellStyle(accentDark,true,WHITE),alignment:{horizontal:'right',vertical:'center'},numFmt:'0.0'}},
+      {v:'',s:cellStyle(accentDark)},
+    ]);
+    // Footer
+    aoa.push(['','','','','']);
+    aoa.push([{v:'Genererad '+new Date().toISOString().slice(0,10)+' via Körjournal-appen',s:{font:{name:'Calibri',sz:8,italic:true,color:{rgb:'AAAAAA'}}}},'','','','']);
+
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=[{wch:20},{wch:38},{wch:38},{wch:10},{wch:24}];
+    ws['!rows']=[{hpt:10},{hpt:28},{hpt:16},{hpt:10},{hpt:6},{hpt:22},{hpt:20}];
+    ws['!merges']=[
+      {s:{r:1,c:0},e:{r:1,c:4}},
+      {s:{r:2,c:0},e:{r:2,c:4}},
+      {s:{r:5,c:0},e:{r:5,c:1}},
+      {s:{r:5,c:2},e:{r:5,c:4}},
+    ];
+    return ws;
+  }
+
+  function buildSummary(){
+    const aoa=[];
+    aoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','']);
+    aoa.push([{v:'Körjournal — Sammanfattning',s:titleStyle(BLUE_DARK)},'','']);
+    aoa.push([{v:'Period: '+periodFrom+' – '+periodTo,s:{font:{name:'Calibri',sz:10,color:{rgb:'AACCDD'}},fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}},alignment:{vertical:'center'}}},'','']);
+    aoa.push([{v:'',s:{fill:{patternType:'solid',fgColor:{rgb:BLUE_DARK}}}},'','']);
+    aoa.push(['','','']);
+    const rows=[
+      ['',{v:'Antal körningar',s:cellStyle('E8F0F8',true,BLUE_DARK)},{v:'Kilometer',s:cellStyle('E8F0F8',true,BLUE_DARK)}],
+      [{v:'Tjänsteresor',s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)},{v:biz.length,s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)},{v:totalKm(biz).toFixed(1)+' km',s:cellStyle(GREEN_LIGHT,false,GREEN_DARK)}],
+      [{v:'Privatresor',s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)},{v:priv.length,s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)},{v:totalKm(priv).toFixed(1)+' km',s:cellStyle(AMBER_LIGHT,false,AMBER_DARK)}],
+      [{v:'Totalt',s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)},{v:STATE.trips.length,s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)},{v:totalKm(STATE.trips).toFixed(1)+' km',s:cellStyle(BLUE_LIGHT,true,BLUE_DARK)}],
+    ];
+    rows.forEach(r=>aoa.push(r));
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=[{wch:24},{wch:18},{wch:16}];
+    ws['!merges']=[
+      {s:{r:1,c:0},e:{r:1,c:2}},
+      {s:{r:2,c:0},e:{r:2,c:2}},
+    ];
+    return ws;
+  }
+
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,buildSummary(),'Sammanfattning');
+  XLSX.utils.book_append_sheet(wb,buildSheet(biz,'Tjänsteresor',GREEN_DARK,GREEN_MID,GREEN_LIGHT),'Tjänsteresor');
+  XLSX.utils.book_append_sheet(wb,buildSheet(priv,'Privatresor',AMBER_DARK,AMBER_DARK,AMBER_LIGHT),'Privatresor');
+  XLSX.writeFile(wb,'korjournal_'+periodFrom+'_'+periodTo+'.xlsx');
 }
 
 function clearAll(){if(!confirm('Rensa alla körningar?'))return;STATE.trips=[];STATE.selected.clear();save();updateStats();renderTable();}
