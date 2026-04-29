@@ -254,81 +254,82 @@ function handleFile(file){
 }
 
 async function parseXLSXfromBuffer(buf){
-  // Unzip the xlsx file and parse the XML directly — bypasses SheetJS style bugs
   const zip=await JSZip.loadAsync(buf);
 
-  // Get shared strings
-  let sharedStrings=[];
+  // 1. Shared strings
+  let shared=[];
   const ssFile=zip.file('xl/sharedStrings.xml');
   if(ssFile){
-    const ssXml=await ssFile.async('string');
-    const parser=new DOMParser();
-    const ssDoc=parser.parseFromString(ssXml,'text/xml');
-    sharedStrings=Array.from(ssDoc.querySelectorAll('si')).map(si=>{
-      return Array.from(si.querySelectorAll('t')).map(t=>t.textContent).join('');
-    });
+    const xml=await ssFile.async('string');
+    const doc=new DOMParser().parseFromString(xml,'text/xml');
+    shared=Array.from(doc.querySelectorAll('si')).map(si=>
+      Array.from(si.querySelectorAll('t')).map(t=>t.textContent||'').join('')
+    );
   }
 
-  // Get first sheet
+  // 2. Sheet XML
   const wsFile=zip.file('xl/worksheets/sheet1.xml');
-  if(!wsFile)throw new Error('Hittade ingen kalkylblads-XML i filen');
+  if(!wsFile)throw new Error('Hittade ingen sheet1.xml i filen');
   const wsXml=await wsFile.async('string');
-  const parser=new DOMParser();
-  const wsDoc=parser.parseFromString(wsXml,'text/xml');
+  const wsDoc=new DOMParser().parseFromString(wsXml,'text/xml');
 
-  // Parse rows
-  const xmlRows=Array.from(wsDoc.querySelectorAll('row'));
-  const rawRows=xmlRows.map(row=>{
-    const cells=Array.from(row.querySelectorAll('c'));
+  // Helper: column letter(s) to 0-based index
+  function colIdx(ref){
+    const m=ref.match(/^([A-Z]+)/);
+    if(!m)return 0;
+    return m[1].split('').reduce((n,c)=>n*26+(c.charCodeAt(0)-64),0)-1;
+  }
+
+  // Helper: Excel serial date to ISO string
+  function serialToISO(n){
+    const d=new Date(Math.round((n-25569)*86400*1000));
+    return d.toISOString();
+  }
+
+  // 3. Parse all rows
+  const rowEls=Array.from(wsDoc.querySelectorAll('row'));
+  const rows=rowEls.map(rowEl=>{
+    const cells=Array.from(rowEl.querySelectorAll('c'));
     if(!cells.length)return[];
-    // Find max col index
-    const getColIdx=ref=>{
-      const m=ref.match(/^([A-Z]+)/);
-      if(!m)return 0;
-      return m[1].split('').reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
-    };
-    const maxCol=Math.max(...cells.map(c=>getColIdx(c.getAttribute('r')||'')));
+    const maxCol=Math.max(...cells.map(c=>colIdx(c.getAttribute('r')||'A')));
     const arr=new Array(maxCol+1).fill('');
     cells.forEach(c=>{
-      const ref=c.getAttribute('r')||'';
-      const idx=getColIdx(ref);
-      const t=c.getAttribute('t');
+      const idx=colIdx(c.getAttribute('r')||'A');
+      const t=c.getAttribute('t')||'';
       const vEl=c.querySelector('v');
-      if(!vEl){arr[idx]='';return;}
+      if(!vEl)return;
       if(t==='s'){
-        arr[idx]=sharedStrings[parseInt(vEl.textContent)]||'';
-      } else if(t==='inlineStr'){
-        arr[idx]=c.querySelector('t')?.textContent||'';
+        arr[idx]=shared[parseInt(vEl.textContent)||0]||'';
       } else {
-        // Check if it's a date (Excel serial number with date style)
-        const s=c.getAttribute('s');
-        const val=vEl.textContent;
-        // Try to detect date columns by value range (Excel dates > 40000)
-        const num=parseFloat(val);
-        if(!isNaN(num)&&num>40000&&num<60000&&s){
-          // Convert Excel serial date to JS date
-          const d=new Date(Math.round((num-25569)*86400*1000));
-          arr[idx]=d.toISOString();
+        const num=parseFloat(vEl.textContent);
+        // Date detection: Excel serial 40000-60000 with a style attribute
+        if(!isNaN(num)&&num>40000&&num<60000&&c.getAttribute('s')){
+          arr[idx]=serialToISO(num);
         } else {
-          arr[idx]=val;
+          arr[idx]=vEl.textContent||'';
         }
       }
     });
     return arr;
   });
 
-  parseXLSX(rawRows);
+  // 4. Find header row (contains 'Startadress')
+  let hdrIdx=rows.findIndex(r=>r.some(v=>String(v).toLowerCase()==='startadress'));
+  if(hdrIdx<0)throw new Error('Hittade ingen rubrikrad med "Startadress" i filen');
+
+  parseXLSX(rows.slice(hdrIdx));  // pass header row + data to parseXLSX
 }
 
 function parseXLSX(rows){
   try {
     if(!rows||rows.length<2){showAlert('importAlert','❌ Tom fil.','err');return;}
 
-    // Find header row dynamically — Automile puts headers on row 8
+    // First row IS the header (already sliced in parseXLSXfromBuffer)
+    // But also support direct call with full sheet (CSV path uses parseXLSX with all rows)
     let headerRowIdx=0;
-    for(let i=0;i<Math.min(rows.length,15);i++){
+    for(let i=0;i<Math.min(rows.length,3);i++){
       const r=rows[i].map(h=>String(h||'').toLowerCase());
-      if(r.some(h=>h.includes('startadress')||h.includes('slutadress')||h.includes('start address'))){
+      if(r.some(h=>h.includes('startadress')||h.includes('slutadress'))){
         headerRowIdx=i;break;
       }
     }
@@ -343,8 +344,7 @@ function parseXLSX(rows){
       note:fc(['anteckningar','anteckning','note','notes','kommentar']),
       driver:fc(['förare','driver']),
     };
-    // Data starts after header row
-    const dataRows=rows.slice(headerRowIdx+1);
+    const dataRows=rows.slice(headerRowIdx+1).filter(r=>r&&r.some(v=>v!==''&&v!==null&&v!==undefined));
     // Read with no styles to avoid null style errors
     const trips=[];
     for(let i=0;i<dataRows.length;i++){
