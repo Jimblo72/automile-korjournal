@@ -250,8 +250,16 @@ function parseXLSX(buf){
     const ws=wb.Sheets[wb.SheetNames[0]];
     const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
     if(rows.length<2){showAlert('importAlert','❌ Tom fil.','err');return;}
-    // Convert to CSV-like processing
-    const headers=rows[0].map(h=>String(h).trim().toLowerCase());
+
+    // Find header row dynamically — Automile puts headers on row 8
+    let headerRowIdx=0;
+    for(let i=0;i<Math.min(rows.length,15);i++){
+      const r=rows[i].map(h=>String(h||'').toLowerCase());
+      if(r.some(h=>h.includes('startadress')||h.includes('slutadress')||h.includes('start address'))){
+        headerRowIdx=i;break;
+      }
+    }
+    const headers=rows[headerRowIdx].map(h=>String(h||'').trim().toLowerCase());
     const fc=(cands)=>{for(const c of cands){const i=headers.findIndex(h=>h.includes(c));if(i>=0)return i;}return -1;};
     const cols={
       date:fc(['startat','tid','datum','date','startdate']),
@@ -262,9 +270,11 @@ function parseXLSX(buf){
       note:fc(['anteckningar','anteckning','note','notes','kommentar']),
       driver:fc(['förare','driver']),
     };
+    // Data starts after header row
+    const dataRows=rows.slice(headerRowIdx+1);
     const trips=[];
-    for(let i=1;i<rows.length;i++){
-      const c=rows[i];
+    for(let i=0;i<dataRows.length;i++){
+      const c=dataRows[i];
       const from=cols.from>=0?String(c[cols.from]||'').trim():'';
       const to=cols.to>=0?String(c[cols.to]||'').trim():'';
       if(!from&&!to)continue;
