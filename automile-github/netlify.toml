@@ -1,6 +1,6 @@
 [build]
-  publish = "public"
-  functions = "netlify/functions"
+  publish = "automile-github/public"
+  functions = "automile-github/netlify/functions"
 
-[functions]
-  node_bundler = "esbuild"
+[functions."parse_excel"]
+  runtime = "python3.9"
