@@ -254,10 +254,10 @@ function parseXLSX(buf){
     const headers=rows[0].map(h=>String(h).trim().toLowerCase());
     const fc=(cands)=>{for(const c of cands){const i=headers.findIndex(h=>h.includes(c));if(i>=0)return i;}return -1;};
     const cols={
-      date:fc(['tid','datum','date','startdate','start']),
+      date:fc(['startat','tid','datum','date','startdate']),
       from:fc(['startadress','från','from','start address']),
-      to:fc(['slutadress','till','to','end address','slutadr']),
-      km:fc(['sträcka','km','kilometer','distance','avstånd']),
+      to:fc(['slutadress','till','to','end address']),
+      km:fc(['körsträcka','sträcka','km','kilometer','distance','avstånd']),
       type:fc(['restyp','typ','type','category','kategori']),
       note:fc(['anteckningar','anteckning','note','notes','kommentar']),
       driver:fc(['förare','driver']),
@@ -357,7 +357,7 @@ function splitLine(line,delim){
 }
 
 function pDate(s){if(!s)return '';const d=new Date(s.replace(/[^0-9\-\/\.T :]/g,''));return isNaN(d)?s:d.toISOString();}
-function pType(s){const l=(s||'').toLowerCase();if(l.includes('tjänst')||l.includes('business')||l.includes('work')||l==='1')return 'business';if(l.includes('privat')||l.includes('private')||l.includes('personal')||l==='2')return 'private';return null;}
+function pType(s){const l=(s||'').toLowerCase();if(l.includes('tjänst')||l.includes('business')||l.includes('work')||l==='1')return 'business';if(l.includes('privat')||l.includes('private')||l.includes('personal')||l==='2')return 'private';if(l.includes('annat')||l.includes('other'))return 'unclassified';return null;}
 
 function addManual(){
   const from=document.getElementById('mFrom').value.trim();
