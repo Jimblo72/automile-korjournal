@@ -90,7 +90,7 @@ tr:hover td{background:#ffffff05}
 input[type="checkbox"]{width:14px;height:14px;accent-color:var(--accent2);cursor:pointer}
 select option{background:var(--surface2)}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <header>
@@ -236,16 +236,44 @@ function handleFile(file){
     const reader=new FileReader();
     reader.onload=e=>{
       try{
-        // Use binary string + raw:true to skip all style processing
-        const wb=XLSX.read(e.target.result,{type:'binary',cellDates:true,cellStyles:false,raw:false,sheetStubs:false});
+        const data=new Uint8Array(e.target.result);
+        const wb=XLSX.read(data,{
+          type:'array',
+          cellDates:true,
+          cellStyles:false,
+          cellNF:false,
+          cellHTML:false,
+          sheetStubs:false,
+          dense:false,
+          WTF:false
+        });
         const ws=wb.Sheets[wb.SheetNames[0]];
-        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false,blankrows:false});
+        // Convert to JSON safely
+        let rows=[];
+        try{
+          rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false,blankrows:false});
+        }catch(e2){
+          // Fallback: manual cell reading
+          const ref=ws['!ref'];
+          if(ref){
+            const range=XLSX.utils.decode_range(ref);
+            for(let r=range.s.r;r<=range.e.r;r++){
+              const row=[];
+              for(let c=range.s.c;c<=range.e.c;c++){
+                const addr=XLSX.utils.encode_cell({r,c});
+                const cell=ws[addr];
+                row.push(cell?cell.v:'');
+              }
+              rows.push(row);
+            }
+          }
+        }
         parseXLSX(rows);
       }catch(err){
         showAlert('importAlert','❌ Kunde inte läsa Excel-filen: '+err.message,'err');
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   } else if(name.endsWith('.csv')){
     const reader=new FileReader();
     reader.onload=e=>parseCSV(e.target.result);
